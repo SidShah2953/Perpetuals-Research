@@ -58,7 +58,7 @@ def _raw_to_df(raw: list[dict]) -> pd.DataFrame:
         "v": "volume", "n": "num_trades",
     })
     df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
-    for col in ("open", "high", "low", "close", "volume"):
+    for col in ("open", "high", "low", "close", "volume", "num_trades"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df

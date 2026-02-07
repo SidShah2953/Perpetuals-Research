@@ -1,0 +1,13 @@
+asset,coin,dex,yf_ticker,data_since
+Gold,GOLD,cash,GC=F,2026-02-05
+Gold,GOLD,flx,GC=F,2025-12-12
+Gold,GOLD,km,GC=F,2026-01-28
+Gold,GOLD,xyz,GC=F,2025-12-22
+Silver,SILVER,cash,SI=F,2026-02-06
+Silver,SILVER,flx,SI=F,2025-12-17
+Silver,SILVER,km,SI=F,2026-01-28
+Silver,SILVER,xyz,SI=F,2025-12-26
+Natural Gas,NATGAS,xyz,NG=F,2026-01-21
+Oil,CL,xyz,CL=F,2026-01-06
+Oil,OIL,flx,CL=F,2026-01-09
+Oil,USOIL,km,CL=F,2026-01-22

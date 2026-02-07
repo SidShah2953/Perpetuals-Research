@@ -1,15 +1,12 @@
-"""Hyperliquid perpetuals data collection pipeline.
-
-Steps:
-  1. Collect all perp contracts by DEX           -> hl_all_perps.csv
-  2. Classify every perp by asset type           -> hl_asset_classification.csv
-  3. Get inception dates for commodity perps      -> hl_commodity_inception.csv
-"""
+import os
 
 import pandas as pd
 
 from dataCollection.hyperliquid import HyperliquidClient
 from dataCollection.hyperliquid.perpetuals import markets, classification, candles
+from utils import setup_output_directory
+
+OUTPUT_DIR = setup_output_directory()
 
 
 def step_1_collect_markets(client: HyperliquidClient) -> pd.DataFrame:
@@ -27,8 +24,9 @@ def step_1_collect_markets(client: HyperliquidClient) -> pd.DataFrame:
         n_active = (~dex_slice["is_delisted"]).sum()
         print(f"    {dex}: {n_active} active / {len(dex_slice)} total")
 
-    df.to_csv("hl_all_perps.csv", index=False)
-    print(f"\n  -> hl_all_perps.csv")
+    path = os.path.join(OUTPUT_DIR, "hl_all_perps.csv")
+    df.to_csv(path, index=False)
+    print(f"\n  -> {path}")
     return df
 
 
@@ -45,8 +43,9 @@ def step_2_classify(client: HyperliquidClient) -> pd.DataFrame:
         print(f"  {asset_type}: {len(group)}")
     print(f"  Total: {len(df)} unique assets")
 
-    df.to_csv("hl_asset_classification.csv", index=False)
-    print(f"\n  -> hl_asset_classification.csv")
+    path = os.path.join(OUTPUT_DIR, "hl_asset_classification.csv")
+    df.to_csv(path, index=False)
+    print(f"\n  -> {path}")
     return df
 
 
@@ -94,8 +93,9 @@ def step_3_commodity_inception(
 
     df = pd.DataFrame(rows)
     df = df.sort_values(["coin", "dex"]).reset_index(drop=True)
-    df.to_csv("hl_commodity_inception.csv", index=False)
-    print(f"\n  -> hl_commodity_inception.csv")
+    path = os.path.join(OUTPUT_DIR, "hl_commodity_inception.csv")
+    df.to_csv(path, index=False)
+    print(f"\n  -> {path}")
     return df
 
 
