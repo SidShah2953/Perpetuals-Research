@@ -8,7 +8,8 @@ Steps:
 
 import pandas as pd
 
-from dataCollection.hyperliquid import HyperliquidClient, markets, classification, candles
+from dataCollection.hyperliquid import HyperliquidClient
+from dataCollection.hyperliquid.perpetuals import markets, classification, candles
 
 
 def step_1_collect_markets(client: HyperliquidClient) -> pd.DataFrame:

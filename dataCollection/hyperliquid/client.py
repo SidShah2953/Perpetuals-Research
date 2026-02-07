@@ -99,6 +99,16 @@ class HyperliquidClient:
             payload["endTime"] = end_time
         return self._post(payload)
 
+    # ── spot metadata ─────────────────────────────────────────────────────
+
+    def spot_meta(self) -> dict:
+        """Spot token + pair metadata (``{type: "spotMeta"}``)."""
+        return self._post({"type": "spotMeta"})
+
+    def spot_meta_and_asset_ctxs(self) -> list:
+        """Spot metadata + live context (``{type: "spotMetaAndAssetCtxs"}``)."""
+        return self._post({"type": "spotMetaAndAssetCtxs"})
+
     # ── order book & trades ──────────────────────────────────────────────
 
     def l2_book(self, coin: str) -> dict:

@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from ..common.types import AssetType
-from .constants import (
+from ...common.types import AssetType
+from ..constants import (
     CRYPTO_ONLY_DEXS,
     FIXED_INCOME,
     FOREX,
@@ -18,12 +18,12 @@ from .constants import (
 )
 
 if TYPE_CHECKING:
-    from .client import HyperliquidClient
+    from ..client import HyperliquidClient
 
 
 def _ensure_client(client: HyperliquidClient | None) -> HyperliquidClient:
     if client is None:
-        from .client import HyperliquidClient as _Cls
+        from ..client import HyperliquidClient as _Cls
         return _Cls()
     return client
 

@@ -1,4 +1,4 @@
-"""Market metadata, DEX info, and live market snapshots for Hyperliquid."""
+"""Market metadata, DEX info, and live market snapshots for Hyperliquid perps."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 if TYPE_CHECKING:
-    from .client import HyperliquidClient
+    from ..client import HyperliquidClient
 
 
 def _ensure_client(client: HyperliquidClient | None) -> HyperliquidClient:
     if client is None:
-        from .client import HyperliquidClient as _Cls
+        from ..client import HyperliquidClient as _Cls
         return _Cls()
     return client
 
@@ -62,7 +62,7 @@ def get_markets(client: HyperliquidClient | None = None) -> pd.DataFrame:
     client = _ensure_client(client)
     data = client.meta()
     rows = []
-    for asset in dataCollection.get("universe", []):
+    for asset in data.get("universe", []):
         name = asset.get("name", "")
         base = name.split("-")[0] if "-" in name else name
         rows.append({
