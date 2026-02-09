@@ -1,4 +1,4 @@
-"""Fetch 1h OHLCV data, aggregate across DEXs, and join with TradFi data per asset."""
+"""Fetch 1d OHLCV data, aggregate across DEXs, and join with TradFi data per asset."""
 
 import os
 
@@ -11,14 +11,14 @@ from dataCollection.yfinance.spots import candles as yf_candles
 from utils import setup_output_directory
 
 OUTPUT_DIR = setup_output_directory()
-OHLCV_DIR = os.path.join(OUTPUT_DIR, "ohlcv_1h")
+OHLCV_DIR = os.path.join(OUTPUT_DIR, "ohlcv_1d")
 
 
 def fetch_all_dex_data(chosen: pd.DataFrame, client: HyperliquidClient) -> dict[str, list[pd.DataFrame]]:
-    """Fetch 1h OHLCV for every coin/dex row, grouped by asset."""
+    """Fetch 1d OHLCV for every coin/dex row, grouped by asset."""
     asset_frames: dict[str, list[pd.DataFrame]] = {}
 
-    print(f"Fetching 1h OHLCV for {len(chosen)} coin/dex pairs (Hyperliquid)\n")
+    print(f"Fetching 1d OHLCV for {len(chosen)} coin/dex pairs (Hyperliquid)\n")
 
     for i, row in chosen.iterrows():
         asset, coin, dex, data_since = row["asset"], row["coin"], row["dex"], row["data_since"]
@@ -26,7 +26,7 @@ def fetch_all_dex_data(chosen: pd.DataFrame, client: HyperliquidClient) -> dict[
 
         print(f"  [{i + 1:>2}/{len(chosen)}] {coin:<10} on {dex:<6} from {data_since} ... ", end="", flush=True)
 
-        df = hl_candles.fetch_ohlcv(ticker, data_since, "1h", client=client)
+        df = hl_candles.fetch_ohlcv(ticker, data_since, "1d", client=client)
 
         # keep only the columns we need
         keep = ["time", "open", "high", "low", "close", "volume", "num_trades"]
@@ -61,7 +61,7 @@ def aggregate_dex(frames: list[pd.DataFrame]) -> pd.DataFrame:
 
 
 def fetch_tradfi(chosen: pd.DataFrame, client: YFinanceClient) -> dict[str, pd.DataFrame]:
-    """Fetch 1h OHLCV for each unique yfinance ticker, keyed by asset."""
+    """Fetch 1d OHLCV for each unique yfinance ticker, keyed by asset."""
     asset_yf: dict[str, pd.DataFrame] = {}
 
     assets = chosen.groupby("asset").agg(
@@ -69,14 +69,14 @@ def fetch_tradfi(chosen: pd.DataFrame, client: YFinanceClient) -> dict[str, pd.D
         earliest=("data_since", "min"),
     )
 
-    print(f"\nFetching 1h OHLCV for {len(assets)} yfinance underlyings\n")
+    print(f"\nFetching 1d OHLCV for {len(assets)} yfinance underlyings\n")
 
     for i, (asset, row) in enumerate(assets.iterrows(), 1):
         yf_ticker, earliest = row["yf_ticker"], row["earliest"]
 
         print(f"  [{i:>2}/{len(assets)}] {yf_ticker:<10} from {earliest} ... ", end="", flush=True)
 
-        df = yf_candles.fetch_ohlcv(yf_ticker, earliest, "1h", client=client)
+        df = yf_candles.fetch_ohlcv(yf_ticker, earliest, "1d", client=client)
         keep = ["time", "open", "high", "low", "close", "volume"]
         df = df[[c for c in keep if c in df.columns]]
 
@@ -101,6 +101,10 @@ def build_excel(
 
     defi["time"] = pd.to_datetime(defi["time"], utc=True)
     tradfi["time"] = pd.to_datetime(tradfi["time"], utc=True)
+
+    # For daily data, normalize to date only (remove time component)
+    defi["time"] = defi["time"].dt.normalize()
+    tradfi["time"] = tradfi["time"].dt.normalize()
 
     # prefix columns
     defi = defi.rename(columns={c: f"defi_{c}" for c in defi.columns if c != "time"})
