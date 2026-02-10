@@ -45,10 +45,12 @@ def get_markets(client: EdgeXClient | None = None) -> pd.DataFrame:
             "quote_coin": contract.get("quoteCoinId"),
             "min_order_size": float(contract.get("minOrderSize", 0)),
             "max_order_size": float(contract.get("maxOrderSize", 0)),
-            "taker_fee_rate": float(contract.get("takerFeeRate", 0)),
-            "maker_fee_rate": float(contract.get("makerFeeRate", 0)),
-            "max_leverage": int(contract.get("maxLeverage", 0)),
-            "status": contract.get("status"),
+            "taker_fee_rate": float(contract.get("defaultTakerFeeRate", 0)),
+            "maker_fee_rate": float(contract.get("defaultMakerFeeRate", 0)),
+            "max_leverage": int(contract.get("defaultLeverage", 0)),
+            "enable_trade": contract.get("enableTrade", False),
+            "enable_display": contract.get("enableDisplay", False),
+            "enable_open_position": contract.get("enableOpenPosition", False),
         })
 
     return pd.DataFrame(rows)
