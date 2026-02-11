@@ -1,10 +1,14 @@
-"""Phase 1B: Multi-chain OHLCV data collection and aggregation.
+"""Phase 1B: Multi-asset type OHLCV data collection and aggregation.
 
-Fetches 1d OHLCV data from all chains for selected assets, aggregates
-liquidity across chains, and compares with TradFi data.
+Fetches hourly OHLCV data from all chains/DEXs for selected assets across
+multiple asset types (commodities, equities, crypto, etc.), aggregates
+liquidity, and compares with TradFi data.
+
+Asset selection is driven by CSV files in the `chosen/` folder.
 """
 
 import os
+import glob
 
 import pandas as pd
 
@@ -19,65 +23,154 @@ from dataCollection.yfinance.spots import candles as yf_candles
 from utils import setup_output_directory
 
 OUTPUT_DIR = setup_output_directory()
-OHLCV_DIR = os.path.join(OUTPUT_DIR, "ohlcv_1d_multichain")
+CHOSEN_DIR = "chosen"
+OHLCV_DIR = os.path.join(OUTPUT_DIR, "ohlcv_1d_multiasset")
 
 
-def load_asset_selection(csv_path: str) -> pd.DataFrame:
-    """Load user-selected assets for data collection.
+# ══════════════════════════════════════════════════════════════════════════════
+# Asset Selection Loading
+# ══════════════════════════════════════════════════════════════════════════════
 
-    Expected CSV columns:
-    - asset: Common asset name (e.g., "BTC", "ETH")
-    - chain: "hyperliquid", "edgex", or "zklighter"
-    - chain_market_id: Market/contract identifier on that chain
-    - data_since: Earliest date with data (YYYY-MM-DD)
+
+def load_all_chosen_assets() -> pd.DataFrame:
+    """Load and merge all asset selection CSVs from the chosen/ folder.
+
+    Returns a DataFrame with columns:
+    - asset: Common asset name (e.g., "BTC", "Gold", "NVDA")
+    - coin: The ticker/symbol on the DEX (e.g., "BTC", "GOLD", "NVDA")
+    - dex: DEX name (e.g., "Hyperliquid (native)", "xyz", "flx", "cash")
     - yf_ticker: Corresponding yfinance ticker (optional)
+    - data_since: Earliest date with data (YYYY-MM-DD)
+    - asset_type: Inferred from the CSV filename (e.g., "Traditional Commodity", "Crypto Coin")
     """
-    if not os.path.exists(csv_path):
+    if not os.path.exists(CHOSEN_DIR):
         raise FileNotFoundError(
-            f"Asset selection file not found: {csv_path}\n"
-            f"Please create a CSV with columns: asset, chain, chain_market_id, data_since, yf_ticker"
+            f"Chosen directory not found: {CHOSEN_DIR}\n"
+            f"Please create a 'chosen/' folder with CSV files for each asset type."
         )
-    return pd.read_csv(csv_path)
+
+    csv_files = glob.glob(os.path.join(CHOSEN_DIR, "*.csv"))
+
+    if not csv_files:
+        raise FileNotFoundError(
+            f"No CSV files found in {CHOSEN_DIR}\n"
+            f"Please add CSV files with columns: asset, coin, dex, yf_ticker, data_since"
+        )
+
+    all_selections = []
+
+    print(f"\nLoading asset selections from {CHOSEN_DIR}:")
+    for csv_path in csv_files:
+        # Extract asset type from filename (e.g., "Traditional Commodity.csv" -> "Traditional Commodity")
+        asset_type = os.path.splitext(os.path.basename(csv_path))[0]
+
+        try:
+            df = pd.read_csv(csv_path)
+
+            # Skip empty files
+            if df.empty:
+                print(f"  ⊘ {asset_type}: 0 selections (empty file)")
+                continue
+
+            df["asset_type"] = asset_type
+            all_selections.append(df)
+
+            n_assets = len(df["asset"].unique())
+            n_selections = len(df)
+            print(f"  ✓ {asset_type}: {n_assets} assets, {n_selections} DEX selections")
+
+        except pd.errors.EmptyDataError:
+            print(f"  ⊘ {asset_type}: 0 selections (empty file)")
+            continue
+
+    if not all_selections:
+        raise ValueError(f"No valid asset selections found in {CHOSEN_DIR}")
+
+    combined = pd.concat(all_selections, ignore_index=True)
+
+    print(f"\n  Total: {len(combined['asset'].unique())} unique assets, {len(combined)} DEX selections\n")
+
+    return combined
 
 
-def fetch_chain_data(
+# ══════════════════════════════════════════════════════════════════════════════
+# Hyperliquid DEX Resolution
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+_NATIVE_DEX_ALIASES = {"Hyperliquid (native)", "native", "hl", "hyperliquid"}
+
+
+def resolve_hyperliquid_coin(coin: str, dex: str) -> str:
+    """Build the API coin identifier for Hyperliquid DEXs.
+
+    Native DEX coins are bare symbols (e.g., "BTC"), while third-party DEX
+    coins are prefixed (e.g., "xyz:GOLD").
+    """
+    if ":" in coin:
+        return coin  # Already fully qualified
+    if dex.lower() in {a.lower() for a in _NATIVE_DEX_ALIASES}:
+        return coin  # Native DEX, no prefix needed
+    return f"{dex}:{coin}"  # Third-party DEX, add prefix
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Data Fetching
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def fetch_selected_data(
     selected: pd.DataFrame,
     hl_client: HyperliquidClient,
     edgex_client: EdgeXClient,
     zkl_client: ZkLighterClient,
+    interval: str = "1d",
 ) -> dict[str, list[pd.DataFrame]]:
-    """Fetch 1d OHLCV for every selected market, grouped by asset."""
+    """Fetch daily OHLCV for every selected market, grouped by asset.
+
+    Returns a dict mapping asset name -> list of DataFrames (one per DEX/chain).
+    """
     asset_frames: dict[str, list[pd.DataFrame]] = {}
 
-    print(f"Fetching 1d OHLCV for {len(selected)} markets across all chains\n")
+    print(f"Fetching {interval} OHLCV for {len(selected)} market selections\n")
 
     for i, row in selected.iterrows():
         asset = row["asset"]
-        chain = row["chain"]
-        market_id = row["chain_market_id"]
+        coin = row["coin"]
+        dex = row["dex"]
         data_since = row["data_since"]
+        asset_type = row["asset_type"]
 
-        print(f"  [{i + 1:>2}/{len(selected)}] {asset:<10} on {chain:<12} from {data_since} ... ", end="", flush=True)
+        print(f"  [{i + 1:>3}/{len(selected)}] {asset:<12} ({asset_type:<25}) on {dex:<20} from {data_since} ... ", end="", flush=True)
 
         try:
-            if chain == "hyperliquid":
-                df = hl_candles.fetch_ohlcv(market_id, data_since, "1d", client=hl_client)
-            elif chain == "edgex":
-                df = edgex_candles.fetch_ohlcv(market_id, data_since, "1d", client=edgex_client)
-            elif chain == "zklighter":
-                df = zkl_candles.fetch_ohlcv(int(market_id), data_since, "1d", client=zkl_client)
-            else:
-                print(f"Unknown chain: {chain}")
-                continue
+            # Try to determine which platform this is on
+            # For now, we'll assume all are on Hyperliquid unless explicitly specified
+            # In a production system, you'd have a more sophisticated routing mechanism
+
+            # Assume Hyperliquid for now (since that's where most DEXs are)
+            ticker = resolve_hyperliquid_coin(coin, dex)
+            df = hl_candles.fetch_ohlcv(ticker, data_since, interval, client=hl_client)
 
             # Standardize columns
-            keep = ["time", "open", "high", "low", "close", "volume"]
+            keep = ["time", "open", "high", "low", "close", "volume", "num_trades"]
             df = df[[c for c in keep if c in df.columns]]
+
+            # Calculate notional volume
+            # DEX perpetuals report volume in base asset units (e.g., BTC, ETH)
+            # Multiply by price to get USD notional volume
+            if "volume" in df.columns and "close" in df.columns:
+                df["notional_volume"] = df["volume"] * df["close"]
+
+            # Add metadata
+            df["dex"] = dex
+            df["asset_type"] = asset_type
 
             # Save individual file
             os.makedirs(OHLCV_DIR, exist_ok=True)
             safe_asset = asset.replace("/", "_")
-            path = os.path.join(OHLCV_DIR, f"{safe_asset}_{chain}_{market_id}.csv")
+            safe_dex = dex.replace("/", "_").replace(":", "_")
+            path = os.path.join(OHLCV_DIR, f"{safe_asset}_{safe_dex}.csv")
             df.to_csv(path, index=False)
             print(f"{len(df)} bars -> {os.path.basename(path)}")
 
@@ -89,27 +182,12 @@ def fetch_chain_data(
     return asset_frames
 
 
-def aggregate_chains(frames: list[pd.DataFrame]) -> pd.DataFrame:
-    """Aggregate multiple chain DataFrames: mean prices, sum volumes."""
-    combined = pd.concat(frames, ignore_index=True)
-    combined["time"] = pd.to_datetime(combined["time"], utc=True)
-
-    agg = combined.groupby("time").agg(
-        open=("open", "mean"),
-        high=("high", "mean"),
-        low=("low", "mean"),
-        close=("close", "mean"),
-        volume=("volume", "sum"),
-    ).sort_index()
-
-    return agg.reset_index()
-
-
 def fetch_tradfi(
     selected: pd.DataFrame,
     client: YFinanceClient,
+    interval: str = "1d",
 ) -> dict[str, pd.DataFrame]:
-    """Fetch 1d OHLCV for each unique yfinance ticker, keyed by asset."""
+    """Fetch daily OHLCV for each unique yfinance ticker, keyed by asset."""
     asset_yf: dict[str, pd.DataFrame] = {}
 
     # Get unique yfinance tickers
@@ -122,20 +200,34 @@ def fetch_tradfi(
         print("\n  No yfinance tickers specified. Skipping TradFi data.\n")
         return asset_yf
 
-    print(f"\nFetching 1d OHLCV for {len(yf_assets)} yfinance underlyings\n")
+    print(f"\nFetching {interval} OHLCV for {len(yf_assets)} yfinance underlyings\n")
 
     for i, (asset, row) in enumerate(yf_assets.iterrows(), 1):
         yf_ticker, earliest = row["yf_ticker"], row["earliest"]
 
-        print(f"  [{i:>2}/{len(yf_assets)}] {yf_ticker:<10} from {earliest} ... ", end="", flush=True)
+        print(f"  [{i:>2}/{len(yf_assets)}] {yf_ticker:<12} from {earliest} ... ", end="", flush=True)
 
         try:
-            df = yf_candles.fetch_ohlcv(yf_ticker, earliest, "1d", client=client)
+            df = yf_candles.fetch_ohlcv(yf_ticker, earliest, interval, client=client)
             keep = ["time", "open", "high", "low", "close", "volume"]
             df = df[[c for c in keep if c in df.columns]]
 
+            # Calculate notional volume
+            # For crypto tickers (BTC-USD, ETH-USDT, etc.), yfinance reports volume in USD already
+            # For stocks and commodities, volume needs to be multiplied by price
+            if "volume" in df.columns and "close" in df.columns:
+                is_crypto = any(yf_ticker.upper().endswith(suffix) for suffix in
+                               ["-USD", "-USDT", "-BUSD", "-USDC", "USD", "USDT"])
+
+                if is_crypto:
+                    # Crypto: volume is already in USD
+                    df["notional_volume"] = df["volume"]
+                else:
+                    # Stocks/Commodities: volume * price = USD
+                    df["notional_volume"] = df["volume"] * df["close"]
+
             safe_ticker = yf_ticker.replace("/", "_")
-            path = os.path.join(OHLCV_DIR, f"{safe_ticker}.csv")
+            path = os.path.join(OHLCV_DIR, f"{safe_ticker}_yf.csv")
             df.to_csv(path, index=False)
             print(f"{len(df)} bars -> {os.path.basename(path)}")
 
@@ -147,13 +239,51 @@ def fetch_tradfi(
     return asset_yf
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Data Aggregation
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def aggregate_dexs(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    """Aggregate multiple DEX DataFrames: mean prices, sum volumes."""
+    combined = pd.concat(frames, ignore_index=True)
+    combined["time"] = pd.to_datetime(combined["time"], utc=True)
+
+    # Aggregate by time
+    agg_dict = {
+        "open": "mean",
+        "high": "mean",
+        "low": "mean",
+        "close": "mean",
+        "volume": "sum",
+    }
+
+    # Include num_trades if available
+    if "num_trades" in combined.columns:
+        agg_dict["num_trades"] = "sum"
+
+    # Include notional_volume if available
+    if "notional_volume" in combined.columns:
+        agg_dict["notional_volume"] = "sum"
+
+    agg = combined.groupby("time").agg(agg_dict).sort_index()
+
+    return agg.reset_index()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Excel Export
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 def build_excel(
     asset: str,
+    asset_type: str,
     defi: pd.DataFrame,
     tradfi: pd.DataFrame,
     output_dir: str,
 ) -> str:
-    """Join DeFi (multi-chain aggregate) and TradFi into one Excel file."""
+    """Join DeFi (multi-DEX aggregate) and TradFi into one Excel file."""
     defi = defi.copy()
     tradfi = tradfi.copy()
 
@@ -161,15 +291,18 @@ def build_excel(
     if not tradfi.empty:
         tradfi["time"] = pd.to_datetime(tradfi["time"], utc=True)
 
-    # Normalize to date only (remove time component)
-    defi["time"] = defi["time"].dt.normalize()
+    # Normalize to daily timestamps (round down to day)
+    defi["time"] = defi["time"].dt.floor("D")
     if not tradfi.empty:
-        tradfi["time"] = tradfi["time"].dt.normalize()
+        tradfi["time"] = tradfi["time"].dt.floor("D")
 
     # Prefix columns
-    defi = defi.rename(columns={c: f"defi_{c}" for c in defi.columns if c != "time"})
+    defi_cols = {c: f"defi_{c}" for c in defi.columns if c != "time"}
+    defi = defi.rename(columns=defi_cols)
+
     if not tradfi.empty:
-        tradfi = tradfi.rename(columns={c: f"tradfi_{c}" for c in tradfi.columns if c != "time"})
+        tradfi_cols = {c: f"tradfi_{c}" for c in tradfi.columns if c != "time"}
+        tradfi = tradfi.rename(columns=tradfi_cols)
 
     # Merge
     if tradfi.empty:
@@ -182,31 +315,29 @@ def build_excel(
     # Excel doesn't support tz-aware datetimes
     merged["time"] = merged["time"].dt.tz_localize(None)
 
+    # Create asset type subfolder
+    safe_type = asset_type.replace("/", "_")
+    type_dir = os.path.join(output_dir, safe_type)
+    os.makedirs(type_dir, exist_ok=True)
+
     safe_asset = asset.replace("/", "_")
-    path = os.path.join(output_dir, f"{safe_asset}.xlsx")
+    path = os.path.join(type_dir, f"{safe_asset}.xlsx")
     merged.to_excel(path, index=False, sheet_name=asset)
     return path
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Main
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 def main():
-    print("\n" + "=" * 70)
-    print("MULTI-CHAIN OHLCV DATA COLLECTION - PHASE 1B")
-    print("=" * 70)
+    print("\n" + "=" * 80)
+    print("MULTI-ASSET TYPE OHLCV DATA COLLECTION - PHASE 1B")
+    print("=" * 80)
 
-    # Load asset selection
-    # You can create this CSV manually or use the output from phase1A_multichain
-    selection_file = "selected_assets_multichain.csv"
-    if not os.path.exists(selection_file):
-        print(f"\nError: {selection_file} not found.")
-        print("Please create a CSV with columns: asset, chain, chain_market_id, data_since, yf_ticker")
-        print("\nExample:")
-        print("  asset,chain,chain_market_id,data_since,yf_ticker")
-        print("  BTC,hyperliquid,BTC,2024-01-01,BTC-USD")
-        print("  BTC,edgex,10000001,2024-01-01,BTC-USD")
-        print("  BTC,zklighter,1,2024-01-01,BTC-USD")
-        return
-
-    selected = load_asset_selection(selection_file)
+    # Load all asset selections from chosen/ folder
+    selected = load_all_chosen_assets()
 
     # Initialize clients
     hl_client = HyperliquidClient()
@@ -215,35 +346,40 @@ def main():
     yf_client = YFinanceClient()
     os.makedirs(OHLCV_DIR, exist_ok=True)
 
-    # 1. Fetch chain data
-    print("\n" + "=" * 70)
-    print("Fetching OHLCV from all chains")
-    print("=" * 70 + "\n")
-    asset_frames = fetch_chain_data(selected, hl_client, edgex_client, zkl_client)
+    # Fetch DeFi data
+    print("\n" + "=" * 80)
+    print("Fetching OHLCV from DEXs")
+    print("=" * 80 + "\n")
+    asset_frames = fetch_selected_data(selected, hl_client, edgex_client, zkl_client, interval="1d")
 
-    # 2. Fetch TradFi data
-    print("\n" + "=" * 70)
+    # Fetch TradFi data
+    print("\n" + "=" * 80)
     print("Fetching TradFi data (yfinance)")
-    print("=" * 70)
-    asset_tradfi = fetch_tradfi(selected, yf_client)
+    print("=" * 80)
+    asset_tradfi = fetch_tradfi(selected, yf_client, interval="1d")
 
-    # 3. Aggregate and build Excel files
-    print("\n" + "=" * 70)
+    # Aggregate and build Excel files
+    print("\n" + "=" * 80)
     print("Building Excel files per asset")
-    print("=" * 70 + "\n")
+    print("=" * 80 + "\n")
+
+    # Group by asset type for better organization
+    asset_types = selected.groupby("asset")["asset_type"].first()
 
     for asset in sorted(asset_frames):
-        defi = aggregate_chains(asset_frames[asset])
+        defi = aggregate_dexs(asset_frames[asset])
         tradfi = asset_tradfi.get(asset, pd.DataFrame())
+        asset_type = asset_types.get(asset, "Unknown")
 
-        n_chains = len(asset_frames[asset])
-        path = build_excel(asset, defi, tradfi, OUTPUT_DIR)
+        n_dexs = len(asset_frames[asset])
+        path = build_excel(asset, asset_type, defi, tradfi, OUTPUT_DIR)
         tradfi_bars = len(tradfi) if not tradfi.empty else 0
-        print(f"  {asset:<14} {n_chains} chains, {len(defi)} defi bars, {tradfi_bars} tradfi bars -> {os.path.basename(path)}")
+        print(f"  {asset:<14} ({asset_type:<25}) {n_dexs} DEXs, {len(defi):>6} defi bars, {tradfi_bars:>6} tradfi bars -> {os.path.basename(os.path.dirname(path))}/{os.path.basename(path)}")
 
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 80)
     print("DONE")
-    print("=" * 70)
+    print("=" * 80)
+    print(f"\nOutput saved to: {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":

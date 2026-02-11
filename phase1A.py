@@ -345,7 +345,7 @@ def step_3_market_snapshots(classification_df: pd.DataFrame) -> pd.DataFrame:
                         "open_interest": "Open Interest",
                         "chain_market_id": "DEXs Trading"
                         })\
-                    .sort_values(['Name', 'Asset Type', 'Chain'])
+                    .sort_values(['Asset Type', 'Name', 'Chain'])
 
     path = os.path.join(OUTPUT_DIR, "market_snapshot.csv")
     output_df.to_csv(path, index=False)

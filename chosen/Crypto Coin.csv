@@ -1,0 +1,12 @@
+asset,coin,dex,yf_ticker,data_since
+BTC,BTC,Hyperliquid (native),BTC-USD,2020-08-19
+BTC,BTC,flx,BTC-USD,2020-08-19
+BTC,BTC,hyna,BTC-USD,2020-08-19
+ETH,ETH,Hyperliquid (native),ETH-USD,2020-08-19
+ETH,ETH,hyna,ETH-USD,2020-08-19
+SOL,SOL,Hyperliquid (native),SOL-USD,2020-09-14
+SOL,SOL,hyna,SOL-USD,2020-09-14
+LINK,LINK,Hyperliquid (native),LINK-USD,2020-09-01
+LINK,LINK,hyna,LINK-USD,2020-09-01
+ADA,ADA,Hyperliquid (native),ADA-USD,2020-09-01
+ADA,ADA,hyna,ADA-USD,2020-09-01
