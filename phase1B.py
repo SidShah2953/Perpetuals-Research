@@ -1,10 +1,57 @@
-"""Phase 1B: Multi-asset type OHLCV data collection and aggregation.
+"""Phase 1B: Multi-Asset Type OHLCV Data Collection and Aggregation
 
-Fetches hourly OHLCV data from all chains/DEXs for selected assets across
-multiple asset types (commodities, equities, crypto, etc.), aggregates
-liquidity, and compares with TradFi data.
+Fetches daily OHLCV (Open, High, Low, Close, Volume) data for selected perpetual
+and spot markets, aggregates across multiple DEXs, and compares with TradFi benchmarks.
 
-Asset selection is driven by CSV files in the `chosen/` folder.
+Asset Selection:
+- Assets are selected based on CSV files in the `chosen/` directory
+- Each CSV represents an asset type (e.g., "Traditional Commodity.csv", "Crypto Coin.csv")
+- Required columns: asset, coin, dex, yf_ticker, data_since
+
+Date Range: July 1, 2025 to February 15, 2026
+- Assets with inception dates before July 1, 2025: fetched from July 1, 2025
+- Assets with inception dates after July 1, 2025: use actual inception date
+- All data collection ends on February 15, 2026
+- Inception dates preserved in metadata for analysis
+
+Data Sources:
+1. DeFi Perpetuals:
+   - Hyperliquid (all DEXs: native, xyz, flx, cash, etc.)
+   - edgeX
+   - zkLighter
+2. TradFi Benchmarks:
+   - yfinance (stocks, commodities, crypto spot)
+
+Data Processing:
+1. Fetch OHLCV for each asset/DEX combination
+2. Calculate notional volume (volume × price) for standardized comparison
+3. Aggregate multiple DEXs per asset (mean prices, sum volumes)
+4. Merge DeFi and TradFi data into unified Excel files
+5. Organize outputs by asset type
+
+Outputs:
+- ohlcv_1d_multiasset/ - Individual CSV files per asset/DEX
+- [Asset Type]/[Asset].xlsx - Excel files with merged DeFi + TradFi data
+  - Columns prefixed with defi_ or tradfi_ for easy comparison
+  - Includes: OHLCV, volume, notional_volume, num_trades
+
+Key Features:
+- Multi-DEX liquidity aggregation (sum volumes, average prices)
+- Notional volume calculation for fair cross-asset comparison
+- Smart date range handling (respects inception dates)
+- Organized output by asset type for easy navigation
+- Metadata preservation (inception dates, DEX names, asset types)
+
+Volume Calculation:
+- DeFi Perpetuals: volume (base asset units) × close price = USD notional
+- Crypto Spot (yfinance): volume already in USD (no conversion needed)
+- Stocks/Commodities (yfinance): volume × close price = USD notional
+
+Implementation Notes:
+- Uses client classes from dataCollection module
+- DEX resolution logic handles Hyperliquid prefixes (e.g., "xyz:GOLD")
+- Excel exports use tz-naive timestamps (Excel compatibility)
+- Output directory structure: [Asset Type]/[Asset].xlsx
 """
 
 import os
@@ -25,6 +72,12 @@ from utils import setup_output_directory
 OUTPUT_DIR = setup_output_directory()
 CHOSEN_DIR = "chosen"
 OHLCV_DIR = os.path.join(OUTPUT_DIR, "ohlcv_1d_multiasset")
+
+# Date range for analysis (July 1, 2025 to Feb 15, 2026)
+# Assets with earlier inception will be fetched from July 1, 2025
+# Assets with later inception will use their actual inception date
+START_DATE = "2025-07-01"
+END_DATE = "2026-02-15"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -132,7 +185,9 @@ def fetch_selected_data(
     """
     asset_frames: dict[str, list[pd.DataFrame]] = {}
 
-    print(f"Fetching {interval} OHLCV for {len(selected)} market selections\n")
+    print(f"Fetching {interval} OHLCV for {len(selected)} market selections")
+    print(f"Date range: {START_DATE} to {END_DATE}")
+    print(f"(Assets with earlier inception will use {START_DATE} as start date)\n")
 
     for i, row in selected.iterrows():
         asset = row["asset"]
@@ -141,7 +196,10 @@ def fetch_selected_data(
         data_since = row["data_since"]
         asset_type = row["asset_type"]
 
-        print(f"  [{i + 1:>3}/{len(selected)}] {asset:<12} ({asset_type:<25}) on {dex:<20} from {data_since} ... ", end="", flush=True)
+        # Apply date range: use max(data_since, START_DATE) as start, END_DATE as end
+        actual_start = max(data_since, START_DATE) if pd.notna(data_since) else START_DATE
+
+        print(f"  [{i + 1:>3}/{len(selected)}] {asset:<12} ({asset_type:<25}) on {dex:<20} inception: {data_since}, fetching: {actual_start} to {END_DATE} ... ", end="", flush=True)
 
         try:
             # Try to determine which platform this is on
@@ -150,7 +208,7 @@ def fetch_selected_data(
 
             # Assume Hyperliquid for now (since that's where most DEXs are)
             ticker = resolve_hyperliquid_coin(coin, dex)
-            df = hl_candles.fetch_ohlcv(ticker, data_since, interval, client=hl_client)
+            df = hl_candles.fetch_ohlcv(ticker, actual_start, interval, end=END_DATE, client=hl_client)
 
             # Standardize columns
             keep = ["time", "open", "high", "low", "close", "volume", "num_trades"]
@@ -165,6 +223,7 @@ def fetch_selected_data(
             # Add metadata
             df["dex"] = dex
             df["asset_type"] = asset_type
+            df["inception_date"] = data_since
 
             # Save individual file
             os.makedirs(OHLCV_DIR, exist_ok=True)
@@ -200,15 +259,20 @@ def fetch_tradfi(
         print("\n  No yfinance tickers specified. Skipping TradFi data.\n")
         return asset_yf
 
-    print(f"\nFetching {interval} OHLCV for {len(yf_assets)} yfinance underlyings\n")
+    print(f"\nFetching {interval} OHLCV for {len(yf_assets)} yfinance underlyings")
+    print(f"Date range: {START_DATE} to {END_DATE}")
+    print(f"(Assets with earlier inception will use {START_DATE} as start date)\n")
 
     for i, (asset, row) in enumerate(yf_assets.iterrows(), 1):
         yf_ticker, earliest = row["yf_ticker"], row["earliest"]
 
-        print(f"  [{i:>2}/{len(yf_assets)}] {yf_ticker:<12} from {earliest} ... ", end="", flush=True)
+        # Apply date range: use max(earliest, START_DATE) as start, END_DATE as end
+        actual_start = max(earliest, START_DATE) if pd.notna(earliest) else START_DATE
+
+        print(f"  [{i:>2}/{len(yf_assets)}] {yf_ticker:<12} inception: {earliest}, fetching: {actual_start} to {END_DATE} ... ", end="", flush=True)
 
         try:
-            df = yf_candles.fetch_ohlcv(yf_ticker, earliest, interval, client=client)
+            df = yf_candles.fetch_ohlcv(yf_ticker, actual_start, interval, end=END_DATE, client=client)
             keep = ["time", "open", "high", "low", "close", "volume"]
             df = df[[c for c in keep if c in df.columns]]
 
@@ -225,6 +289,9 @@ def fetch_tradfi(
                 else:
                     # Stocks/Commodities: volume * price = USD
                     df["notional_volume"] = df["volume"] * df["close"]
+
+            # Add inception date metadata
+            df["inception_date"] = earliest
 
             safe_ticker = yf_ticker.replace("/", "_")
             path = os.path.join(OHLCV_DIR, f"{safe_ticker}_yf.csv")

@@ -1,7 +1,38 @@
-"""Phase 1A: Comprehensive multi-chain perpetuals market analysis.
+"""Phase 1A: Comprehensive Multi-Chain Perpetuals Market Analysis
 
-Combines market collection, classification, snapshots, and inception date analysis
-across Hyperliquid, edgeX, and zkLighter.
+Discovers and analyzes perpetual futures markets across multiple DeFi chains to identify
+trading opportunities and market characteristics.
+
+Supported Chains:
+- Hyperliquid (multiple DEXs: native, xyz, flx, cash, etc.)
+- edgeX
+- zkLighter
+
+Analysis Pipeline:
+1. Market Discovery - Fetch all perpetual contracts from all chains
+2. Asset Classification - Categorize assets by type (Traditional Commodity, Traditional Equity, Crypto Coin, etc.)
+3. Live Market Snapshots - Collect current price, volume, open interest, and funding rates
+4. Top Asset Identification - Identify highest volume assets per category
+5. Inception Date Analysis - Determine data availability for selected assets
+
+Outputs:
+- all_chains_markets.csv - Complete list of all perpetual markets
+- asset_classification_multichain.csv - Asset categorization with chain mapping
+- market_snapshot.csv - Live market data across all chains
+- top5_assets_by_type.xlsx - Top assets by volume with inception dates and DEX coverage
+
+Key Features:
+- Multi-chain aggregation across Hyperliquid, edgeX, and zkLighter
+- Smart caching system for inception dates (reduces API calls on subsequent runs)
+- Timeout handling for slow API responses
+- Excel export with organized sheets per asset type
+- Comprehensive metadata (inception dates, days available, chain coverage)
+
+Implementation Notes:
+- Uses client classes from dataCollection module (HyperliquidClient, EdgeXClient, ZkLighterClient)
+- Classification logic in dataCollection.common.classification module
+- Cache stored in cache/inception_dates_cache.csv for faster re-runs
+- Output directory structure created by utils.setup_output_directory()
 """
 
 import os
