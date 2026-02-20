@@ -20,8 +20,10 @@ This research project analyzes the growing DeFi perpetuals market by collecting 
 Perpetuals Research/
 ├── phase1A.py              # Multi-chain market discovery & classification
 ├── phase1B.py              # OHLCV data collection & aggregation
-├── phase2A.ipynb           # Interactive visualizations
-├── phase2B.ipynb           # Statistical analysis
+├── phase2A.ipynb           # Interactive visualizations (Plotly, notebook)
+├── phase2B.ipynb           # Rolling t-test analysis & CSV export (notebook)
+├── phase3A.py              # Dates research: significant event catalogue
+├── phase4.py               # Pre-writing analyses & paper figure generation
 │
 ├── dataCollection/         # API clients for all data sources
 │   ├── hyperliquid/        # Hyperliquid API (native + third-party DEXs)
@@ -41,13 +43,27 @@ Perpetuals Research/
 │   ├── Traditional Equity.csv
 │   └── Crypto Coin.csv
 │
+├── Paper/                  # Academic paper working directory
+│   ├── main.tex            # Paper manuscript (LaTeX)
+│   ├── Dates/              # Event narrative research & breadth data
+│   └── Working Docs/       # Pre-writing planning, lit review folders,
+│                           # and per-task analysis justifications
+│
 ├── cache/                  # Cached inception dates
 │   └── inception_dates_cache.csv
 │
 └── output/                 # All generated outputs
     ├── Phase 1A/           # Market discovery outputs
-    ├── Phase 1B/           # OHLCV data by asset type
-    └── Phase 2B/           # Statistical analysis exports
+    ├── Phase 1B/           # OHLCV data by asset type (Excel)
+    ├── Phase 2B/           # T-test CSVs (Daily Volume Analysis/)
+    ├── Phase 3A/           # Significant event catalogue CSVs
+    └── Phase 4/            # Pre-writing analyses & paper figures
+        ├── Cross-Correlation/
+        ├── Price-Tracking/
+        ├── Volume-Ratios/
+        ├── Funding-Rate-Analysis/
+        ├── Tables/
+        └── Figures/
 ```
 
 ---
@@ -246,6 +262,73 @@ from utils import (
 
 ---
 
+### Phase 3A: Dates Research — Significant Event Catalogue
+
+**Purpose:** Transform Phase 2B t-test results into a structured event catalogue for news and narrative research, identifying the most economically significant volume anomaly dates.
+
+**Process:**
+1. **Load t-test CSVs** — Read all 17 per-asset t-test files from `output/Phase 2B/Daily Volume Analysis/`
+2. **Enrich with metadata** — Add full asset names, asset types, and day-over-day volume % changes
+3. **Filter to significant dates** — Retain only rows where |t| ≥ 4.303 (same threshold as Phase 2B)
+4. **Export event catalogue** — One row per (asset, date) event with t-scores, volumes, and % changes
+5. **Compute breadth summary** — Per-date count of how many assets showed simultaneous anomalies
+
+**Outputs:**
+- `output/Phase 3A/significant_events.csv` — One row per asset-date significant event (1,797 events)
+- `output/Phase 3A/dates_breadth_summary.csv` — Per-date breadth statistics (DeFi-only, TradFi-only, both)
+
+**Run:**
+```bash
+python phase3A.py
+```
+
+---
+
+### Phase 4: Pre-Writing Analysis & Paper Figure Generation
+
+**Purpose:** Execute all pre-writing data tasks and generate publication-quality figures for the academic paper. Consolidates DATA-1 through DATA-6 analysis tasks into a single script following the project's phase convention.
+
+**Analysis Period:** July 1, 2025 to February 15, 2026 (reads from Phase 1B; t-test data from Phase 2B)
+
+**DATA Exports:**
+
+| Task | Description | Output |
+|------|-------------|--------|
+| DATA-1 | Cross-correlation (lags −7 to +7) | `Cross-Correlation/*.csv` |
+| DATA-2 | Price tracking accuracy | `Price-Tracking/price_tracking_summary.csv` |
+| DATA-3 | Volume ratios (TradFi/DeFi) | `Volume-Ratios/volume_ratios.csv` |
+| DATA-4 | Snapshot funding rate analysis | `Funding-Rate-Analysis/*.csv` |
+| DATA-5 | Table 1 descriptive statistics | `Tables/table1_descriptive_stats.csv` |
+
+All outputs are written under `output/Phase 4/`.
+
+**Paper Figures (PNG 300 dpi + PDF):**
+
+| Figure | Description |
+|--------|-------------|
+| Figure 1 | DeFi vs. TradFi daily volume time series by asset class |
+| Figure 2 | T-score heatmap — 17 assets × full date range |
+| Figure 3 | Event study — average abnormal volume ±10 days around macro events |
+| Figure 4 | Cross-correlation bar charts by asset class |
+| Figure 5 | DeFi vs. TradFi price tracking scatter plots |
+| Figure 6 | Cross-asset breadth timeline (simultaneous anomaly count per day) |
+| Figure 7 | Snapshot funding rates (annualised) across all 17 assets |
+| Figure 8 | TradFi/DeFi volume ratio bar chart (ranked, log scale) |
+
+**Key implementation notes:**
+- Figures use matplotlib with Agg backend (300 dpi PNG + PDF); Plotly is not required
+- Figure 4 reads cross-correlation CSVs from `output/Phase 4/Cross-Correlation/`
+- Figures 2, 3 read t-test CSVs from `output/Phase 2B/Daily Volume Analysis/` (Phase 2B output)
+- Commodity name mapping (`GOLD`/`SILVER`/`NATGAS`/`OIL`) reconciles differences between
+  `market_snapshot.csv` ticker names and Phase 1B Excel file stems
+
+**Run:**
+```bash
+python phase4.py
+```
+
+---
+
 ## Utilities Module
 
 The `utils/` module provides reusable analysis functions used across Phase 2A and 2B:
@@ -296,7 +379,7 @@ The analysis covers four major asset categories:
    - DeFi: Perpetual futures on DEXs
    - TradFi: Spot trading (yfinance)
 
-4. **Crypto Memecoin** (if selected)
+4. **Crypto Memecoin** (supported by Phase 1A/1B; excluded from Phase 4 paper analysis)
    - DOGE, PEPE, SHIB, WIF
    - DeFi: Perpetual futures on DEXs
    - TradFi: Spot trading (yfinance)
@@ -342,7 +425,7 @@ The analysis covers four major asset categories:
 ### Requirements
 ```bash
 # Python 3.10+
-pip install pandas numpy openpyxl plotly scipy yfinance
+pip install pandas numpy openpyxl plotly scipy yfinance matplotlib
 ```
 
 ### Project Setup
@@ -350,9 +433,13 @@ pip install pandas numpy openpyxl plotly scipy yfinance
 2. Create `chosen/` directory with asset selection CSVs
 3. Run phases sequentially:
    ```bash
-   python phase1A.py  # Discover markets
-   python phase1B.py  # Collect OHLCV data
-   # Then run phase2A.ipynb and phase2B.ipynb in Jupyter
+   python phase1A.py   # Discover markets & collect funding rate snapshot
+   python phase1B.py   # Collect OHLCV data for all 17 assets
+   # Open phase2A.ipynb in Jupyter — interactive volume/price visualizations
+   # Open phase2B.ipynb in Jupyter — rolling t-test analysis, exports CSVs
+   python phase3A.py   # Build significant event catalogue from t-test results
+   python phase4.py    # Run cross-correlation, price tracking, volume ratios,
+                       # funding rate summary, Table 1, and all 8 paper figures
    ```
 
 ---
@@ -388,7 +475,8 @@ pip install pandas numpy openpyxl plotly scipy yfinance
 ### Export Formats
 - **CSV** - Individual files per asset/DEX for granular analysis
 - **Excel** - Merged DeFi + TradFi data with organized sheets
-- **Interactive Charts** - Plotly visualizations in notebooks
+- **Interactive Charts** - Plotly visualizations in notebooks (Phases 2A, 2B)
+- **Static Figures** - PNG (300 dpi) and PDF for publication (Phase 4)
 
 ---
 
